@@ -1,0 +1,170 @@
+<html>
+<head>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Roboto+Mono:wght@300&display=swap" rel="stylesheet">
+  <style>
+    html {
+      border-top: 5px solid #4e9af1;
+    }
+    textarea { 
+      font-family: 'Roboto Mono', monospace;
+      font-size: 0.8em;
+    }
+    button {
+      background-color: #4e9af1; /* Green */
+      border: 0.16em solid rgba(255,255,255,0);
+      color: white;
+      padding: 6px 16px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      font-size: 1.1em;
+      border-radius:1em;
+      width: 200px;
+      height: 70px;
+    }
+    button.disabled {
+      background-color: rgb(129, 129, 129);
+    }
+    h1 {
+      font-family: 'Architects Daughter';
+      font-size: 2em;
+    }
+    * {
+      font-family: 'Architects Daughter';
+      font-size: 1em;
+    }
+  </style>
+  <script>
+
+    var peerConnection;
+    var dataChannel;
+    var timeStarted;
+
+    function log(msg) {
+      // console.log(new Date().toISOString() + " (" + (new Date()-timeStarted) + "ms): " + msg + "\n");
+      document.getElementById("logs").value += new Date().toISOString() + " (" + (new Date()-timeStarted) + "ms): " + msg + "\n";
+    }
+
+    function sendSDPOffer(payload) {
+      log("sendSDPOffer: Started")
+      var xhttp = new XMLHttpRequest();
+      xhttp.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+          // console.log(this);
+          sdpAnswerStr = atob(this.responseText)
+          log("sendSDPOffer: Finished\n\n[COMPLETE] Received SDP Answer:\n\n" + sdpAnswerStr)
+          sdpAnswer = new RTCSessionDescription(JSON.parse(sdpAnswerStr));
+          log(sdpAnswer);
+          // console.log(sdpAnswer)
+
+          peerConnection.setRemoteDescription(sdpAnswer);
+
+          // document.getElementById("demo").innerHTML = this.responseText;
+        }
+      };
+      xhttp.open("POST", "/sdp", true);
+      xhttp.setRequestHeader("Content-Type", "application/json");
+      xhttp.send(payload);
+    }
+
+    function createOffer() {
+
+      document.getElementById("logs").value = "";
+      document.getElementById("button").className = "disabled";
+      document.getElementById("button").innerHTML = "Running... <img width='18' src='https://c.tenor.com/5o2p0tH5LFQAAAAj/hug.gif' />";
+      timeStarted = new Date();
+
+      log("createOffer: Starting")
+      configuration = {
+        iceServers: [
+          {urls: "stun:stun.stunprotocol.org"}
+        ]};
+      try {
+        peerConnection = new RTCPeerConnection(configuration);
+      } catch(err) {
+        log("createOffer: Exception encountered while creating RTPeerConnection - " + err)
+      }
+      dataChannel = peerConnection.createDataChannel('tsunami');
+      dataChannel.onmessage = handleDataChannelOnMessage;
+      dataChannel.onopen = function() {
+        log("dataChannel.onopen")
+      }
+      dataChannel.onclose = function() {
+        log("dataChannel.onclose")
+      }
+      peerConnection.onicecandidate = handleICECandidate;
+      peerConnection.onconnectionstatechange = handleConnectionStateChange;
+      peerConnection.oniceconnectionstatechange = handleICEConnectionStateChange;
+      promise = peerConnection.createOffer();
+      promise.then(createOfferDone, createOfferFailed);
+    }
+
+    function createOfferDone(offer) {
+      log("createOffer: Finished\n\n[LOCAL] SDP Offer:\n" + offer.sdp)
+      log("setLocalDescription: Starting")
+      setLocalPromise = peerConnection.setLocalDescription(offer);
+      setLocalPromise.then(setLocalDescriptionDone, setLocalDescriptionFailed);
+    }
+
+    function createOfferFailed(reason) {
+      log("createOfferFailed: Failed - " + reason)
+    }
+
+    function setLocalDescriptionDone() {
+      log("setLocalDescription: Finished")
+    }
+
+    function setLocalDescriptionFailed(reason) {
+      log("setLocalDescription: Failed - " + reason)
+    }
+
+    function handleDataChannelOnMessage(event) {
+      log("handleDataChannelOnMessage: Received [" + event.data.length + " bytes] value: " + event.data)
+    }
+
+    function handleICECandidate(event) {
+      if (event.candidate != null) {
+        candidate = event.candidate.address + ":" + event.candidate.port + " (" + event.candidate.protocol + ")"
+        log("handleICECandidate: Found: " + candidate)
+      } else {
+        offer = peerConnection.localDescription;
+        log("handleICECandidate: Finished\n\n[COMPLETE] SDP Offer:\n\n" + offer.sdp)
+        sendSDPOffer(offer.sdp);
+      }
+    }
+
+    function handleConnectionStateChange(event) {
+      log("handleConnectionStateChange: " + event)
+      // console.log(event)
+    }
+
+    function handleICEConnectionStateChange(event) {
+      log("handleICEConnectionStateChange: " + event)
+      // console.log(event)
+    }
+
+  </script>
+</head>
+<body>
+
+<div style="width: 80%; text-align: center; margin: 0 auto;">
+  
+  <div style="text-align: left">
+    <h1>Tsunami Demo</h1>
+  </div>
+
+  <div>
+    <textarea readonly id="logs" style="width: 100%; height: 80%;"></textarea>
+  </div>
+
+  <table width="100%">
+    <tr>
+      <td><button style="float:left" id="button" onclick="createOffer()">Start Demo</button></td>
+    </tr>
+  </table>
+
+</div>
+</body>
+</html>
