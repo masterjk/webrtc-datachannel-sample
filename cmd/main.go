@@ -16,15 +16,37 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+var workers map[uint16]*Worker
+
+type Worker struct {
+	id          uint16
+	dataChannel *webrtc.DataChannel
+	enabled     bool
+}
+
+func (w *Worker) Start() {
+	log.Debug().Msg("Worker started")
+	w.enabled = true
+	for w.enabled {
+		sendText := fmt.Sprintf("Hello world!  Time now is %s", time.Now().Format(time.RFC3339))
+		err := w.dataChannel.SendText(sendText)
+		if err != nil {
+			log.Error().Err(err).Msg("Error sending via data channel")
+		}
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func (w *Worker) Stop() {
+	log.Debug().Msg("Worker stopped")
+	w.enabled = false
+}
+
 func Encode(obj interface{}) string {
 	b, err := json.Marshal(obj)
 	if err != nil {
 		panic(err)
 	}
-
-	// if compress {
-	// 	b = zip(b)
-	// }
 
 	return base64.StdEncoding.EncodeToString(b)
 }
@@ -54,16 +76,18 @@ func createPeerConnection(sdpOffer string) *webrtc.PeerConnection {
 		dataChannel.OnOpen(func() {
 			log.Debug().Msgf("OnDataChannel %+v", dataChannel)
 
-			for {
-				sendText := fmt.Sprintf("Time now is %s", time.Now().Format(time.RFC3339))
-				err := dataChannel.SendText(sendText)
-				if err != nil {
-					log.Error().Err(err).Msg("Error sending via data channel")
-				}
-				time.Sleep(1 * time.Second)
+			worker := &Worker{
+				id:          *dataChannel.ID(),
+				dataChannel: dataChannel,
 			}
+
+			workers[*dataChannel.ID()] = worker
+			worker.Start()
 		})
 
+		dataChannel.OnClose(func() {
+			workers[*dataChannel.ID()].Stop()
+		})
 	})
 
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -142,6 +166,7 @@ func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: time.RFC3339})
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 
+	workers = map[uint16]*Worker{}
 	r := mux.NewRouter()
 
 	r.HandleFunc("/sdp", handler).Methods("POST")
