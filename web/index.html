@@ -43,8 +43,11 @@
     var timeStarted;
 
     function log(msg) {
-      // console.log(new Date().toISOString() + " (" + (new Date()-timeStarted) + "ms): " + msg + "\n");
-      document.getElementById("logs").value += new Date().toISOString() + " (" + (new Date()-timeStarted) + "ms): " + msg + "\n";
+      if (timeStarted != null) {
+        document.getElementById("logs").value += new Date().toISOString() + " (" + (new Date()-timeStarted) + "ms): " + msg + "\n";
+      } else {
+        document.getElementById("logs").value += new Date().toISOString() + " " + msg + "\n";
+      }
     }
 
     function sendSDPOffer(payload) {
@@ -52,16 +55,11 @@
       var xhttp = new XMLHttpRequest();
       xhttp.onreadystatechange = function() {
         if (this.readyState == 4 && this.status == 200) {
-          // console.log(this);
           sdpAnswerStr = atob(this.responseText)
-          log("sendSDPOffer: Finished\n\n[COMPLETE] Received SDP Answer:\n\n" + sdpAnswerStr)
+          log("sendSDPOffer: Finished\n\n[HTTP Response] Received:\n" + sdpAnswerStr + "\n")
           sdpAnswer = new RTCSessionDescription(JSON.parse(sdpAnswerStr));
-          log(sdpAnswer);
-          // console.log(sdpAnswer)
-
+          log("sendSDPOffer: Finished\n\n[SDP_ANSWER] Received:\n" + sdpAnswer.sdp + "\n")
           peerConnection.setRemoteDescription(sdpAnswer);
-
-          // document.getElementById("demo").innerHTML = this.responseText;
         }
       };
       xhttp.open("POST", "/sdp", true);
@@ -102,7 +100,7 @@
     }
 
     function createOfferDone(offer) {
-      log("createOffer: Finished\n\n[LOCAL] SDP Offer:\n" + offer.sdp)
+      log("createOffer: Finished\n\n[SDP_OFFER] Local Only:\n" + offer.sdp)
       log("setLocalDescription: Starting")
       setLocalPromise = peerConnection.setLocalDescription(offer);
       setLocalPromise.then(setLocalDescriptionDone, setLocalDescriptionFailed);
@@ -130,19 +128,70 @@
         log("handleICECandidate: Found: " + candidate)
       } else {
         offer = peerConnection.localDescription;
-        log("handleICECandidate: Finished\n\n[COMPLETE] SDP Offer:\n\n" + offer.sdp)
+        log("handleICECandidate: Finished\n\n[SDP_OFFER] Complete:\n" + offer.sdp)
         sendSDPOffer(offer.sdp);
       }
     }
 
     function handleConnectionStateChange(event) {
-      log("handleConnectionStateChange: " + event)
-      // console.log(event)
+      log("handleConnectionStateChange: " + JSON.stringify(event))
     }
 
     function handleICEConnectionStateChange(event) {
-      log("handleICEConnectionStateChange: " + event)
-      // console.log(event)
+      log("handleICEConnectionStateChange: " + JSON.stringify(event))
+      console.log(event)
+    }
+
+    function debug() {
+      if (peerConnection == null) {
+        log("WebRTC connection has not been set up yet")
+      } else if (peerConnection.connectionState === 'connected') {
+        statsPromise = peerConnection.getStats();
+        statsPromise.then(statsPromiseDone, statsPromiseFailed);
+      } else {
+        log("WebRTC connectionState is not connected")
+      }
+    }
+
+    function statsPromiseDone(stats) {
+      log("statsPromise: Done");
+
+      pairs = getSucceededCandidatePairs(stats)
+      for (const pair of pairs) {
+        local = getCandidate(stats, pair.localCandidateId)
+        remote = getCandidate(stats, pair.remoteCandidateId)
+        log("ICEPair - ID: [" + pair.id + "]; State: [" + pair.state + "]; BytesRcvSnd: [" + pair.bytesReceived + "/" + pair.bytesSent + "]; Local: [" + local.ip + ":" + local.port + "]; Remote: [" + remote.ip + ":" + remote.port + "];");
+      }
+    }
+
+    function statsPromiseFailed() {
+      log("statsPromise: Failed");
+    }
+
+    function getSucceededCandidatePairs(stats) {
+      m = new Map();
+      for (const value of stats.values()) {
+        if (value.type == 'candidate-pair' && value.state == 'succeeded') {
+          if (m.has(value.id)) {
+            exist = m.get(value.id)
+            if (exist.timestamp < value.timestamp) {
+              m.set(value.id, value)
+            }
+          } else {
+            m.set(value.id, value)
+          }
+        }
+      }
+      return m.values()
+    }
+
+    function getCandidate(stats, candidateId) {
+      for (const value of stats.values()) {
+        if ((value.type == 'local-candidate' || value.type == 'remote-candidate') && value.id == candidateId ){
+          return value;
+        }
+      }
+      return null;
     }
 
   </script>
@@ -156,7 +205,7 @@
   </div>
 
   <div>
-    <textarea readonly id="logs" style="width: 100%; height: 80%;"></textarea>
+    <textarea readonly id="logs" style="width: 100%; height: 90%;"></textarea>
   </div>
 
   <table width="100%">
@@ -165,6 +214,7 @@
     </tr>
   </table>
 
+  <button style="float:left" id="button" onclick="debug()">Debug</button>
 </div>
 </body>
 </html>
